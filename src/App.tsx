@@ -1,5 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
+import type { Session } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
 
 type Food = {
   id: number
@@ -48,6 +50,8 @@ const readSavedFoods = (): Record<string, Food[]> => {
 }
 
 function App() {
+  const [session, setSession] = useState<Session | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [foodsByDate, setFoodsByDate] = useState<Record<string, Food[]>>(readSavedFoods)
   const [showScanner, setShowScanner] = useState(false)
   const [showFoodSearch, setShowFoodSearch] = useState(false)
@@ -57,6 +61,15 @@ function App() {
   const foods = foodsByDate[selectedDate] ?? []
   const selectedDateOffset = Math.round((new Date(`${todayKey}T12:00:00`).getTime() - new Date(`${selectedDate}T12:00:00`).getTime()) / 86400000)
   const isToday = selectedDate === todayKey
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      setAuthLoading(false)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    return () => listener.subscription.unsubscribe()
+  }, [])
 
   useEffect(() => {
     try {
@@ -82,12 +95,15 @@ function App() {
     window.setTimeout(() => setNotice(''), 2600)
   }
 
+  if (authLoading) return <div className="auth-loading">Loading NutriTrack...</div>
+  if (!session) return <AuthScreen />
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <a className="wordmark" href="#top" aria-label="NutriTrack home"><span className="mark">N</span>nutri<span>track</span></a>
         <nav className="topnav" aria-label="Main navigation"><a className="active" href="#log">Today</a><a href="#insights">Insights</a><a href="#settings">Settings</a></nav>
-        <button className="avatar" aria-label="Open profile">KD</button>
+        <button className="avatar" aria-label="Sign out" title="Sign out" onClick={() => supabase.auth.signOut()}>{session.user.email?.charAt(0).toUpperCase() || 'U'}</button>
       </header>
       {!storageAvailable && <div className="storage-warning" role="alert">This browser is blocking local storage. Your log may not survive a reload.</div>}
       <section className="hero" id="top">
@@ -111,6 +127,35 @@ function App() {
       {notice && <div className="toast" role="status">✓ {notice}</div>}
     </main>
   )
+}
+
+function AuthScreen() {
+  const [mode, setMode] = useState<'login' | 'signup' | 'magic'>('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    setStatus('')
+    const result = mode === 'signup'
+      ? await supabase.auth.signUp({ email, password })
+      : mode === 'magic'
+        ? await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } })
+        : await supabase.auth.signInWithPassword({ email, password })
+    setBusy(false)
+    if (result.error) {
+      setStatus(result.error.message)
+    } else if (mode === 'signup') {
+      setStatus('Account created. Check your email if confirmation is enabled.')
+    } else if (mode === 'magic') {
+      setStatus('Magic link sent. Check your inbox.')
+    }
+  }
+
+  return <main className="auth-shell"><div className="auth-panel"><a className="wordmark" href="#top"><span className="mark">N</span>nutri<span>track</span></a><p className="eyebrow">Private nutrition tracking</p><h1>{mode === 'signup' ? 'Start your log.' : 'Welcome back.'}</h1><p className="auth-copy">Your food log, available wherever you sign in.</p><div className="auth-tabs"><button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Log in</button><button className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>Create account</button><button className={mode === 'magic' ? 'active' : ''} onClick={() => setMode('magic')}>Magic link</button></div><form className="auth-form" onSubmit={submit}><label>Email<input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>{mode !== 'magic' && <label>Password<input type="password" required minLength={6} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} /></label>}<button className="dark-button" disabled={busy} type="submit">{busy ? 'Working...' : mode === 'signup' ? 'Create account' : mode === 'magic' ? 'Send magic link' : 'Log in'}<span>→</span></button></form>{status && <p className="auth-status" role="status">{status}</p>}<p className="auth-note">Your data belongs to your account.</p></div></main>
 }
 
 function MacroRow({ label, value, goal, color }: { label: string; value: number; goal: number; color: string }) {
