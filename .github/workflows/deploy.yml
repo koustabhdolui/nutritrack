@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         env:
           NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
-        run: npm ci
+        run: npm install --package-lock=false --ignore-scripts --no-audit --no-fund
 
       - name: Build
         run: npm run build
