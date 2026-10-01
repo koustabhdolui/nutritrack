@@ -20,6 +20,9 @@ type Product = {
   code?: string
   product_name?: string
   brands?: string
+  serving_size?: string
+  serving_quantity?: number
+  last_modified_t?: number
   nutriments?: Record<string, number>
 }
 
@@ -226,6 +229,26 @@ function Scanner({ onClose, onAdd }: { onClose: () => void; onAdd: (food: Omit<F
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const weightMultiplier = Math.max(Number(form.weight) || 0, 0) / 100
   const calculated = { calories: Math.round(Number(form.calories || 0) * weightMultiplier), protein: Math.round(Number(form.protein || 0) * weightMultiplier), carbs: Math.round(Number(form.carbs || 0) * weightMultiplier), fat: Math.round(Number(form.fat || 0) * weightMultiplier), fiber: Math.round(Number(form.fiber || 0) * weightMultiplier) }
+  const saveScannedProduct = async (product: Product, normalizedCode: string) => {
+    const nutrients = product.nutriments ?? {}
+    await supabase.from('scanned_products').upsert({
+      barcode: normalizedCode,
+      product_name: product.product_name ?? null,
+      brands: product.brands ?? null,
+      calories_100g: nutrients['energy-kcal_100g'] ?? null,
+      protein_100g: nutrients.proteins_100g ?? null,
+      carbohydrates_100g: nutrients.carbohydrates_100g ?? null,
+      fat_100g: nutrients.fat_100g ?? null,
+      fiber_100g: nutrients.fiber_100g ?? null,
+      sugars_100g: nutrients.sugars_100g ?? null,
+      serving_size: product.serving_size ?? null,
+      serving_quantity: product.serving_quantity ?? null,
+      source: 'openfoodfacts',
+      source_updated_at: typeof product.last_modified_t === 'number' ? new Date(product.last_modified_t * 1000).toISOString() : null,
+      raw_product: product,
+      last_scanned_at: new Date().toISOString(),
+    }, { onConflict: 'barcode' })
+  }
   const selectProduct = (product: Product) => {
     const nutrients = product.nutriments ?? {}
     setForm((current) => ({ ...current, name: product.product_name || product.brands || 'Prepared food', calories: String(nutrients['energy-kcal_100g'] ?? 0), protein: String(nutrients.proteins_100g ?? 0), carbs: String(nutrients.carbohydrates_100g ?? 0), fat: String(nutrients.fat_100g ?? 0), fiber: String(nutrients.fiber_100g ?? 0) }))
@@ -268,6 +291,7 @@ function Scanner({ onClose, onAdd }: { onClose: () => void; onAdd: (food: Omit<F
         localStorage.setItem(cacheKey, JSON.stringify(result.product))
         return result.product
       })
+      void saveScannedProduct(product, normalizedCode)
       const nutrients = product.nutriments ?? {}
       const calories = nutrients['energy-kcal_100g']
       const protein = nutrients.proteins_100g
