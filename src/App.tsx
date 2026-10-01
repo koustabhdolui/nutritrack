@@ -52,6 +52,7 @@ const readSavedFoods = (): Record<string, Food[]> => {
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [authMessage, setAuthMessage] = useState('')
   const [foodsByDate, setFoodsByDate] = useState<Record<string, Food[]>>(readSavedFoods)
   const [showScanner, setShowScanner] = useState(false)
   const [showFoodSearch, setShowFoodSearch] = useState(false)
@@ -63,10 +64,19 @@ function App() {
   const isToday = selectedDate === todayKey
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    const finishAuth = async () => {
+      const params = new URLSearchParams(window.location.search)
+      const code = params.get('code')
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code)
+        window.history.replaceState({}, document.title, window.location.pathname)
+        if (error) setAuthMessage(error.message)
+      }
+      const { data } = await supabase.auth.getSession()
       setSession(data.session)
       setAuthLoading(false)
-    })
+    }
+    void finishAuth()
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
     return () => listener.subscription.unsubscribe()
   }, [])
@@ -96,7 +106,7 @@ function App() {
   }
 
   if (authLoading) return <div className="auth-loading">Loading NutriTrack...</div>
-  if (!session) return <AuthScreen />
+  if (!session) return <AuthScreen initialStatus={authMessage} />
 
   return (
     <main className="app-shell">
@@ -129,11 +139,11 @@ function App() {
   )
 }
 
-function AuthScreen() {
+function AuthScreen({ initialStatus = '' }: { initialStatus?: string }) {
   const [mode, setMode] = useState<'login' | 'signup' | 'magic'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState(initialStatus)
   const [busy, setBusy] = useState(false)
 
   const submit = async (event: FormEvent) => {
